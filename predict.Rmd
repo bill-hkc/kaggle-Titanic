@@ -1,0 +1,121 @@
+Titanic 
+========================================================
+## R packages
+```{r}
+library(dplyr)
+library(stringr)
+library(randomForest)
+library(glmnet)
+```
+## Data input
+```{r}
+df <- read.csv('train.csv',stringsAsFactors=FALSE)
+df.test <- read.csv('test.csv',stringsAsFactors=FALSE)
+```
+We check the summary of data, and the ratio of missing values.
+```{r}
+str(df)
+summary(df)
+
+options(digits=3)
+
+rbind(na = colMeans(is.na(df)), nullstr = colMeans(df == ""))
+rbind(na = colMeans(is.na(df.test)), nullstr = colMeans(df.test == ""))
+```
+
+## Feature Engineering
+A few features are created or modified.  For cabin, we get the first capital letter.  For title, we extract the middle pattern of the name field.  
+```{r}
+
+# extract Cabin/Embarked/Title
+extractFeatures <- function(df) {
+  df %.% 
+    mutate(Cabin = str_extract(Cabin,'^[A-Z]')) %.%
+    mutate(Embarked = str_extract(Embarked,'^[CQS]')) %.%
+    mutate(Title = str_extract(str_extract(Name, ', \\w+\\.'), 
+                               '\\w+'))    
+}
+```
+A few features are removed.
+```{r}
+removeFeatures <- function(df) {
+  df %.% select(-Ticket, -Name, -PassengerId)
+}
+
+```
+
+```{r}
+calculateImputeValues <- function(df) {
+  lapply(df, function(col) 
+    ifelse(is.numeric(col), mean(col, na.rm=T), "Unknown"))
+}
+imputeFeatures <- function(df, impute.values) {
+  for (c in names(df)) {
+      df[[c]] <- ifelse(is.na(df[[c]]), impute.values[[c]], df[[c]])
+  }
+  df
+}
+
+```
+
+```{r}
+chr.features.to.factor <- function(df, use.ref=F, df.ref=NA) {
+  for (c in names(df)) {
+    if (is.character(df[[c]])) {
+      if (!use.ref) {
+        df[[c]] <- factor(df[[c]])
+      }  
+      else {
+        df[[c]] <- factor(df[[c]], levels=levels(df.ref[[c]]))
+      }  
+      df[[c]][is.na(df[[c]])] <- "Unknown"
+    }
+  }
+  df  
+}
+  
+df2 <- extractFeatures(df)
+df2 <- removeFeatures(df2)
+impute.train <- calculateImputeValues(df2)
+df2 <- imputeFeatures(df2, impute.train)
+df2 <- chr.features.to.factor(df2)
+df2 <- df2 %.% mutate(Survived = factor(Survived))
+
+```
+Simliar processing are applied to test set.
+```{r}
+df.test2 <- extractFeatures(df.test)
+df.test2 <- removeFeatures(df.test2)
+
+df.test2 <- imputeFeatures(df.test2, impute.train)
+df.test2 <- chr.features.to.factor(df.test2, use.ref=T, df2)
+```
+## Random forest model
+```{r}
+seed = 123
+set.seed(seed)
+fit.rf <- randomForest(Survived ~  ., data = df2)
+fit.rf
+
+pred <- predict(fit.rf,newdata=df.test2)
+df.out <- data.frame(PassengerId = df.test$PassengerId, 
+                     Survived = pred)
+write.csv(df.out, file="randomForest_1.csv", 
+          row.names=F, col.names=T, quote=F)
+```
+
+### Logistic regression model
+```{r}
+
+set.seed(seed)
+fit.glm <- cv.glmnet(data.matrix(df2 %.% select(-Survived)), df2$Survived,  alpha=1, family="binomial")
+
+coef(fit.glm)
+pred <- predict(fit.glm, newx=data.matrix(df.test2), s = "lambda.min", type="class")
+df.out <- data.frame(PassengerId = df.test$PassengerId, 
+                     Survived = as.vector(pred))
+write.csv(df.out, file="glmnet_1.csv", 
+          row.names=F, col.names=T, quote=F)
+
+```
+
