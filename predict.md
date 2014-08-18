@@ -1,6 +1,8 @@
-Titanic 
+Titanic Survival Prediction
 ========================================================
-## R packages
+## Introduction
+Titanic [1] is a kaggle competition for tutorial purpose.  The goal is to predict whether the passengers survived or not in the sinking of the Titanic.  The data includes passenger information such as sex, age, name, ticket fare, class, number of siblings and parents/children aboard, etc.  The evaluation criteria is the prediction accuracy (rate of correct prediction) of the passengers in a test set.  The test set is splinted into two parts, 50% for public score and 50% for private score. For each submission, the public score is feed-backed immediately, while the private score is kept secret.  After submission deadline, the final ranking is based on the private score.
+## R packages 
 
 ```r
 library(dplyr)
@@ -124,7 +126,8 @@ rbind(na = colMeans(is.na(df.test)), nullstr = colMeans(df.test == ""))
 ## nullstr        0
 ```
 
-## Feature Engineering
+## Pre-processing
+### Feature extraction
 A few features are created or modified.  For cabin, we get the first capital letter.  For title, we extract the middle pattern of the name field.  
 
 ```r
@@ -137,14 +140,15 @@ extractFeatures <- function(df) {
                                '\\w+'))    
 }
 ```
-A few features are removed.
+A few features will not be used in prediction and thus removed.
 
 ```r
 removeFeatures <- function(df) {
   df %.% select(-Ticket, -Name, -PassengerId)
 }
 ```
-
+### Imputing missing values
+For numeric features, the missing values are replaced by the mean of non-missing values.  For categorical features, the missing values are replaced by a fixed string "Unknown".
 
 ```r
 calculateImputeValues <- function(df) {
@@ -158,7 +162,8 @@ imputeFeatures <- function(df, impute.values) {
   df
 }
 ```
-
+### Features as factors
+Character features need to change to factor type.   Note that we need to have the same factor levels for the train data and test data for the prediction function to work properly.  Thus we use the factor levels of the training set as reference.  New levels in the test set will become NAs and then assigned a fixed level "Unknown".
 
 ```r
 chr.features.to.factor <- function(df, use.ref=F, df.ref=NA) {
@@ -190,7 +195,7 @@ df2 <- chr.features.to.factor(df2)
 ```r
 df2 <- df2 %.% mutate(Survived = factor(Survived))
 ```
-Simliar processing are applied to test set.
+Similar processing are applied to test set.  Note that the imputing value is from the training set, not the test set itself.
 
 ```r
 df.test2 <- extractFeatures(df.test)
@@ -204,27 +209,28 @@ df.test2 <- chr.features.to.factor(df.test2, use.ref=T, df2)
 ## Warning: invalid factor level, NA generated
 ```
 ## Random forest model
+First we use random forest as the classifier and use all remaining (non-removed) features for model training.
 
 ```r
 seed = 123
 set.seed(seed)
-fit.rf <- randomForest(Survived ~  ., data = df2)
+fit.rf <- randomForest(Survived ~  ., data = df2, importance=T)
 fit.rf
 ```
 
 ```
 ## 
 ## Call:
-##  randomForest(formula = Survived ~ ., data = df2) 
+##  randomForest(formula = Survived ~ ., data = df2, importance = T) 
 ##                Type of random forest: classification
 ##                      Number of trees: 500
 ## No. of variables tried at each split: 3
 ## 
-##         OOB estimate of  error rate: 16.3%
+##         OOB estimate of  error rate: 17.2%
 ## Confusion matrix:
 ##     0   1 class.error
-## 0 494  55       0.100
-## 1  90 252       0.263
+## 0 490  59       0.107
+## 1  94 248       0.275
 ```
 
 ```r
@@ -232,14 +238,110 @@ pred <- predict(fit.rf,newdata=df.test2)
 df.out <- data.frame(PassengerId = df.test$PassengerId, 
                      Survived = pred)
 write.csv(df.out, file="randomForest_1.csv", 
-          row.names=F, col.names=T, quote=F)
+          row.names=F, quote=F)
+
+varImpPlot(fit.rf)
+```
+
+![plot of chunk unnamed-chunk-9](figure/unnamed-chunk-9.png) 
+The kaggle public score is 0.76555.  We could see the variable importance in the plot.
+### Using fewer features
+We try to use fewer features by only selecting the important ones.  From the kaggle public leaderboard, there is one benchmark called "Gender, Price and Class Based Model".  Thus we try to use only these  features in prediction. The resulting public score is 0.78469.
+
+```r
+set.seed(seed)
+
+fit.rf <- randomForest(Survived ~ Pclass + Sex + Fare  , data = df2)
+fit.rf
 ```
 
 ```
-## Warning: attempt to set 'col.names' ignored
+## 
+## Call:
+##  randomForest(formula = Survived ~ Pclass + Sex + Fare, data = df2) 
+##                Type of random forest: classification
+##                      Number of trees: 500
+## No. of variables tried at each split: 1
+## 
+##         OOB estimate of  error rate: 19.9%
+## Confusion matrix:
+##     0   1 class.error
+## 0 495  54      0.0984
+## 1 123 219      0.3596
 ```
 
-### Logistic regression
+```r
+pred <- predict(fit.rf,newdata=df.test2)
+df.out <- data.frame(PassengerId = df.test$PassengerId, 
+                     Survived = pred)
+write.csv(df.out, file="randomForest_PclassSexFare.csv", 
+          row.names=F, quote=F)
+```
+We could also select features based on the variable importance provided by random forest.  Based on 'MeanDecreaseGini', four features form a leading group: Title, Fare, Age, Sex.  Training a model with these features, we get a kaggle public score 0.75120.
+
+```r
+set.seed(seed)
+
+fit.rf <- randomForest(Survived ~ Title + Fare + Age + Sex, data = df2)
+fit.rf
+```
+
+```
+## 
+## Call:
+##  randomForest(formula = Survived ~ Title + Fare + Age + Sex, data = df2) 
+##                Type of random forest: classification
+##                      Number of trees: 500
+## No. of variables tried at each split: 2
+## 
+##         OOB estimate of  error rate: 18.7%
+## Confusion matrix:
+##     0   1 class.error
+## 0 471  78       0.142
+## 1  89 253       0.260
+```
+
+```r
+pred <- predict(fit.rf,newdata=df.test2)
+df.out <- data.frame(PassengerId = df.test$PassengerId, 
+                     Survived = pred)
+write.csv(df.out, file="randomForest_TitleFareAgeSex.csv", 
+          row.names=F, quote=F)
+```
+Based on 'MeanDecreaseAccuracy', three features form a leading group: Title, Pclass, Fare.  Training a model with these features, we get a kaggle public score 0.79904.
+
+```r
+set.seed(seed)
+
+fit.rf <- randomForest(Survived ~ Title + Pclass + Fare, data = df2)
+fit.rf
+```
+
+```
+## 
+## Call:
+##  randomForest(formula = Survived ~ Title + Pclass + Fare, data = df2) 
+##                Type of random forest: classification
+##                      Number of trees: 500
+## No. of variables tried at each split: 1
+## 
+##         OOB estimate of  error rate: 19.1%
+## Confusion matrix:
+##     0   1 class.error
+## 0 503  46      0.0838
+## 1 124 218      0.3626
+```
+
+```r
+pred <- predict(fit.rf,newdata=df.test2)
+df.out <- data.frame(PassengerId = df.test$PassengerId, 
+                     Survived = pred)
+write.csv(df.out, file="randomForest_TitlePclassFare.csv", 
+          row.names=F, quote=F)
+```
+          
+## Logistic regression model
+Here we try to use a simpler model, logistic regression.  All non-removed features are put into model training, as the glmnet package provides some capability for automatic feature selection.  The kaggle public score is 0.77033.
 
 ```r
 set.seed(seed)
@@ -268,10 +370,7 @@ pred <- predict(fit.glm, newx=data.matrix(df.test2), s = "lambda.min", type="cla
 df.out <- data.frame(PassengerId = df.test$PassengerId, 
                      Survived = as.vector(pred))
 write.csv(df.out, file="glmnet_1.csv", 
-          row.names=F, col.names=T, quote=F)
+          row.names=F, quote=F)
 ```
-
-```
-## Warning: attempt to set 'col.names' ignored
-```
-
+# Reference
+1. https://www.kaggle.com/c/titanic-gettingStarted
