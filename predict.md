@@ -209,7 +209,7 @@ df.test2 <- chr.features.to.factor(df.test2, use.ref=T, df2)
 ## Warning: invalid factor level, NA generated
 ```
 ## Random forest model
-First we use random forest as the classifier and use all remaining (non-removed) features for model training.
+First we use random forest as the classifier and use all remaining (non-removed) features for model training. The kaggle public score is 0.76555.  The random forest model also calculates variable importance shown in the figure.
 
 ```r
 seed = 123
@@ -244,7 +244,7 @@ varImpPlot(fit.rf)
 ```
 
 ![plot of chunk unnamed-chunk-9](figure/unnamed-chunk-9.png) 
-The kaggle public score is 0.76555.  We could see the variable importance in the plot.
+
 ### Using fewer features
 We try to use fewer features by only selecting the important ones.  From the kaggle public leaderboard, there is one benchmark called "Gender, Price and Class Based Model".  Thus we try to use only these  features in prediction. The resulting public score is 0.78469.
 
